@@ -126,7 +126,7 @@ k10 <- d %>%
 
 First, a table of aggregate demographics. Note the data underlying this table is not shared due to small cell sizes and potential identifiability.
 
-```{r demographics-table, error=FALSE}
+```{r demographics-table, error=TRUE}
 demographics <- read_excel("Data-private/Demographics.xlsx")
 
 # Clean data frame
@@ -191,7 +191,7 @@ tab %>%
 
 Then we create a table of demographics for the subgroup analyses.
 
-```{r demographics-anonymise, error = FALSE}
+```{r demographics-anonymise, error = TRUE}
 # Create a public demographics table
 # Variables for covariates and subgroups
 demographics$White <- ifelse(str_detect(demographics$Ethnicity, "White"), "Yes", "No")
@@ -221,7 +221,7 @@ write_csv(demographics, "Data-private/demographics.csv")
 
 We also create a synthetic demographics table for sharing on OSF, with only the PIDs and group assignments reflecting real values, and the actual demographics values are simulated (due to small cell sizes and potential identifiability of participants).
 
-```{r create-synthetic-demographics, error = FALSE, results = 'hide'}
+```{r create-synthetic-demographics, error = TRUE, results = 'hide'}
 library(synthpop)
 demographics_synthetic <- bind_cols(
   demographics[,1:2], 
@@ -232,7 +232,7 @@ write_csv(demographics_synthetic, "Data/demographics-synthetic.csv")
 
 Then we load either the actual demographics values if available (only available to OACE team), otherwise the simulated demographics table (available on OSF).
 
-```{r}
+```{r message = TRUE}
 # Load anonymised demographics data set if available, otherwise synthetic
 if (file.exists("Data-private/demographics.csv")) {
   message("Actual demographics data loaded")
