@@ -173,20 +173,16 @@ demographics <- demographics %>%
   )
 
 # Show table
-demographics %>% 
+tab <- demographics %>% 
   select(-PID, -Education, -K10S) %>%
-  tbl_summary(by = Group) %>% 
+  tbl_summary(by = Group, type = list(all_categorical() ~ "categorical")) %>% 
   add_overall() %>% 
   bold_labels() %>% 
   italicize_levels()
+tab
 
 # Save table to a word file
-demographics %>% 
-  select(-PID, -Education, -K10S) %>%
-  tbl_summary(by = Group) %>% 
-  add_overall() %>% 
-  bold_labels() %>% 
-  italicize_levels() %>% 
+tab %>% 
   as_flex_table() %>% 
   save_as_docx(
     path = "output/Table-Demographics.docx"
