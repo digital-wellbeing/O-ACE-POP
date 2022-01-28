@@ -6,6 +6,7 @@
 
 Data-private/**/*
 data-raw-private/**/*
+output/**/*
 
 *_cache/
 brm-**.rds
