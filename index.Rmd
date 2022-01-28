@@ -1,0 +1,812 @@
+---
+title: "O-ACE POP Analysis"
+author:
+  - name: <a href="https://vuorre.netlify.app">Matti Vuorre</a>
+    affiliation: <a href="https://www.oii.ox.ac.uk/people/matti-vuorre/">University of Oxford</a>
+date: "`r Sys.Date()`"
+output:
+  bookdown::html_document2:
+    theme: yeti
+    css: styles.css
+    highlight: kate
+    code_folding: hide
+    code_download: true
+    self_contained: true
+    number_sections: false
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+---
+
+# Preface
+
+This document describes the O-ACE POP study data analyses. The data and code underlying these analyses are available at <https://osf.io/9wt8d/>.
+
+We used the following R packages.
+
+```{r packages, results = "hide", cache = FALSE, message = FALSE}
+library(knitr)
+library(scales)
+library(janitor)
+library(flextable)
+library(officer)
+library(gtsummary)
+library(ggbeeswarm)
+library(kableExtra)
+library(broom)
+library(afex)
+library(emmeans)
+library(cowplot)
+library(ggstance)
+library(patchwork)
+library(readxl)
+library(tidyverse)
+
+# Document options
+# Knitr options
+opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  cache = TRUE,
+  error = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  fig.retina = 2
+)
+# Plotting theme
+theme_set(
+  theme_linedraw() +
+    theme(
+      panel.grid.minor = element_blank(), 
+      panel.grid.major.x = element_blank()
+    )
+)
+# gtsummary theme
+theme_gtsummary_compact(set_theme = TRUE)
+
+# Temporary output files
+dir.create("output", FALSE)
+```
+
+The survey data is contained in `.xlsx` files in `Data/`. Here we load and clean the data tables.
+
+```{r}
+d <- tibble(
+  path = list.files(
+    "Data", pattern = ".xlsx", 
+    recursive = TRUE, full.names = TRUE
+  )
+) %>% 
+  mutate(file = basename(path)) %>% 
+  separate(file, into = c("Time", "task"), sep = "-") %>% 
+  mutate(task = str_remove(task, ".xlsx")) %>% 
+  mutate(Time = str_replace_all(Time, "_", " ")) %>% 
+  mutate(Time = fct_inorder(Time)) %>% 
+  mutate(data = map(path, read_xlsx)) %>% 
+  select(-path)
+
+# Need to clean all these data frames
+# Some files don't have Group variable so add from one of them,
+# but first have to remove it from where it is
+# Also rename the participant ID variable
+d <- d %>% 
+  mutate(
+    data = map(
+      data, 
+      ~select(., -starts_with("Group")) %>% 
+        left_join(
+          select(d$data[[5]], DeIDnumber, Group), by = "DeIDnumber"
+        ) %>% 
+        rename(PID = DeIDnumber) %>% 
+        mutate(Group = factor(Group, levels = 1:2, labels = c("Ash", "WoB")))
+    )
+  )
+
+# Clean K10 data
+k10 <- d %>% 
+  filter(task == "K10") %>% 
+  unnest(data) %>% 
+  select(Time, PID, Group, contains("quantised")) %>%
+  # Remove 'quantised' from variable names
+  rename_with(~ str_remove(., "-quantised") %>% str_replace("-", "_")) %>%
+  # All items except one have capital letter
+  rename(K10_7 = k10_7) %>%
+  # Take mean score
+  mutate(across(starts_with("K10"), as.numeric)) %>% 
+  mutate(
+    K10 = rowMeans(select(., starts_with("K10_")), na.rm = TRUE),
+    K10S = rowSums(select(., starts_with("K10_")), na.rm = FALSE)
+  ) %>% 
+  select(-starts_with("K10_"))
+```
+
+# Demographics
+
+First, a table of aggregate demographics. Note the data underlying this table is not shared due to small cell sizes and potential identifiability.
+
+```{r demographics-table, error=FALSE}
+demographics <- read_excel("Data-private/Demographics.xlsx")
+
+# Clean data frame
+demographics <- demographics %>% 
+  mutate(Group = factor(Group, levels = 1:2, labels = c("Ash", "WoB"))) %>% 
+  rename(
+    PID = DeIDnumber, 
+    Antidepressant = `Antidepressant-Y/N`,
+    Relationship = `Relationship-status`
+  ) %>% 
+  rename_with(~str_replace_all(., "-", "_"))
+
+# Merge some categories due to small cell sizes
+demographics <- demographics %>% 
+  mutate(
+    Occupation = fct_collapse(
+      Occupation, 
+      Other = c(
+        "Other (please specify)", 
+        "Prefer not to say", 
+        "Unable to work due to disability (not studying)"
+      )
+    ),
+    Relationship = fct_collapse(
+      Relationship,
+      Other = c("Other (please specify)", "Prefer not to say")
+    )
+  )
+
+
+# Need baseline K10 categories
+demographics <- demographics %>% 
+  left_join(filter(k10, Time=="Baseline") %>% select(PID, K10S)) %>% 
+  mutate(
+    Baseline_mild_MH = between(K10S, 20, 24),
+    Baseline_moderate_MH = between(K10S, 25, 29),
+    Baseline_severe_MH = between(K10S, 30, 50)
+  ) %>% 
+  mutate(
+    across(
+      starts_with("Baseline_"), 
+      ~factor(., levels = c(FALSE, TRUE), labels = c("No", "Yes"))
+    )
+  )
+
+# Show table
+demographics %>% 
+  select(-PID, -Education, -K10S) %>%
+  tbl_summary(by = Group) %>% 
+  add_overall() %>% 
+  bold_labels() %>% 
+  italicize_levels()
+
+# Save table to a word file
+demographics %>% 
+  select(-PID, -Education, -K10S) %>%
+  tbl_summary(by = Group) %>% 
+  add_overall() %>% 
+  bold_labels() %>% 
+  italicize_levels() %>% 
+  as_flex_table() %>% 
+  save_as_docx(
+    path = "output/Table-Demographics.docx"
+  )
+```
+
+Then we create a table of demographics for the subgroup analyses.
+
+```{r demographics-anonymise, error = FALSE}
+# Create a public demographics table
+# Variables for covariates and subgroups
+demographics$White <- ifelse(str_detect(demographics$Ethnicity, "White"), "Yes", "No")
+demographics$Male <- ifelse(demographics$Gender=="Male", "Yes", "No")
+demographics$Age1617 <- ifelse(demographics$Age=="16-17", "Yes", "No")
+demographics$Antidepressant <- ifelse(
+  demographics$Antidepressant=="No" | is.na(demographics$Antidepressant), "No", "Yes"
+)
+demographics$Relationship <- ifelse(
+  str_detect(demographics$Relationship, "relationship"), "Yes", "No"
+)
+# More than once a month = "Yes"
+demographics <- demographics %>%   
+  mutate(OCC_Engagement = ifelse(OCC_Engagement_Frequency %in% c("Between once a month and once a year", "Rarely/Never (No more than once a year)"), "No", "Yes"))
+
+# Keep only these
+demographics <- demographics %>% 
+  select(
+    PID, Group, Age1617, 
+    Male, Antidepressant, Relationship, 
+    White, OCC_Engagement, Baseline_moderate_MH
+  )
+
+# Can be shared because no cells are smaller than 10
+write_csv(demographics, "Data-private/demographics.csv")
+```
+
+We also create a synthetic demographics table for sharing on OSF, with only the PIDs and group assignments reflecting real values, and the actual demographics values are simulated (due to small cell sizes and potential identifiability of participants).
+
+```{r create-synthetic-demographics, error = FALSE, results = 'hide'}
+library(synthpop)
+demographics_synthetic <- bind_cols(
+  demographics[,1:2], 
+  as_tibble(syn(demographics[,-c(1,2)])$syn)
+)
+write_csv(demographics_synthetic, "Data/demographics-synthetic.csv")
+```
+
+Then we load either the actual demographics values if available (only available to OACE team), otherwise the simulated demographics table (available on OSF).
+
+```{r}
+# Load anonymised demographics data set if available, otherwise synthetic
+if (file.exists("Data-private/demographics.csv")) {
+  message("Actual demographics data loaded")
+  demographics <- read_csv("Data-private/demographics.csv")
+} else {
+  message("Synthetic demographics data loaded")
+  demographics <- read_csv("Data/demographics-synthetic.csv")
+}
+
+demographics <- demographics %>% 
+  mutate(across(where(is.character), factor))
+
+contrasts(demographics$Age1617) <- c(-.5, .5)
+contrasts(demographics$Antidepressant) <- c(-.5, .5)
+contrasts(demographics$White) <- c(-.5, .5)
+contrasts(demographics$Male) <- c(-.5, .5)
+contrasts(demographics$Relationship) <- c(-.5, .5)
+contrasts(demographics$OCC_Engagement) <- c(-.5, .5)
+contrasts(demographics$Baseline_moderate_MH) <- c(-.5, .5)
+
+demographics %>% 
+  select(-PID) %>%
+  tbl_summary(
+    by = Group,
+    statistic = list(
+      Current_Mental_Health = "{n}"
+    )
+  ) %>% 
+  add_overall() %>% 
+  bold_labels() %>% 
+  italicize_levels()
+```
+
+Clean data sets more and add demographics variables (covariates & subgroups).
+
+```{r}
+# Add demographics to K10
+k10 <- k10 %>% 
+  left_join(demographics)
+
+# PANAS
+# PANAS items for subscales
+npi <- c(
+  "Afraid", "Scared", "Nervous",
+  "Jittery", "Guilty", "Ashamed",
+  "Irritable", "Hostile", "Upset", "Distressed"
+)
+ppi <- c(
+  "Active", "Alert", "Attentive",
+  "Enthusiastic", "Excited", "Inspired",
+  "Interested", "Proud", "Strong", "Determined"
+)
+panas <- d %>% 
+  filter(task == "PANAS") %>% 
+  unnest(data) %>% 
+  select(
+    Time, PID, Group,
+    all_of(npi),
+    all_of(ppi)
+  ) %>%
+  mutate(
+    across(
+      c(all_of(npi), all_of(ppi)),
+      as.numeric
+    )
+  )
+
+# Create scale scores (means)
+panas <- panas %>%
+  mutate(
+    `NA` = rowMeans(panas[, npi], na.rm = TRUE),
+    PA = rowMeans(panas[, ppi], na.rm = TRUE)
+  ) %>% 
+  select(-all_of(c(npi, ppi)))
+
+# Join demographics with panas data
+panas_raw <- left_join(panas, demographics)
+
+# Collapse during intervention into a mean per person
+# Note day 5 counts as intervention
+panas <- panas_raw %>% 
+  mutate(Time = as.character(Time)) %>% 
+  mutate(
+    Time = ifelse(str_detect(Time, "M") | Time=="Day 5", "Intervention", Time)
+  ) %>% 
+  mutate(Time = fct_inorder(Time)) %>% 
+  group_by(across(-c(`NA`, PA))) %>% 
+  summarise(`NA` = mean(`NA`, na.rm = TRUE), PA = mean(PA, na.rm = TRUE)) %>% 
+  ungroup()
+
+# Combined dataframe for K10 and PANAS
+k10 <- k10 %>% 
+  mutate(Time = as.character(Time)) %>% 
+  mutate(Time = ifelse(Time=="Day 5", "Intervention", Time))
+
+dpk <- panas %>% 
+  left_join(k10) %>% 
+  pivot_longer(c(`NA`, PA, K10), names_to = "Outcome") %>% 
+  mutate(
+    Outcome = factor(
+      Outcome, 
+      levels = c("NA", "PA", "K10")
+    )
+  )
+```
+
+# Main analysis
+
+## Means and change over time
+
+```{r PANAS-figure, fig.width = 7.2, fig.height = 4.8, fig.cap = "PANAS over time."}
+panas_raw %>% 
+  pivot_longer(c(`NA`, PA)) %>% 
+  mutate(
+    name = factor(
+      name, 
+      levels = c("NA", "PA"),
+    )
+  ) %>% 
+  ggplot(aes(Time, value, col = Group, fill = Group, group = Group)) +
+  scale_color_brewer(palette = "Set1", aesthetics = c("fill", "color")) +
+  geom_quasirandom(
+    width = .1, dodge.width = .4, 
+    size = .4, alpha = 1 / 4, show.legend = FALSE
+  ) +
+  stat_summary(fun = mean, geom = "line") +
+  stat_summary(
+    fun.data = mean_cl_boot,
+    geom = "ribbon", alpha = .2, col = NA
+  ) +
+  scale_y_continuous("Mean value (95%CI)", breaks = pretty_breaks()) +
+  theme(
+    axis.title.x = element_blank(),
+    legend.position = "none"
+  ) +
+  facet_wrap("name", ncol = 1)
+```
+
+```{r Data-figure, fig.width = 7.8, fig.height = 5.2, fig.cap = "PANAS and K10 means and change over time."}
+p1 <- dpk %>%
+  ggplot(aes(Time, value, col = Group, fill = Group, group = Group)) +
+  scale_color_brewer(palette = "Set1", aesthetics = c("fill", "color")) +
+  geom_quasirandom(
+    width = .1, dodge.width = .4, 
+    size = .4, alpha = 1 / 4, show.legend = FALSE
+  ) +
+  stat_summary(fun = mean, geom = "line") +
+  stat_summary(
+    fun.data = mean_cl_boot,
+    geom = "ribbon", alpha = .2, col = NA
+  ) +
+  scale_y_continuous("Mean value (95%CI)", breaks = pretty_breaks()) +
+  theme(
+    axis.title.x = element_blank(),
+    legend.position = "none"
+  ) +
+  facet_wrap("Outcome", scales = "free_x")
+
+p2_tab <- dpk %>%
+  select(PID, Group, Time, Outcome, value) %>% 
+  group_by(Group, Outcome) %>%
+  nest() %>% 
+  mutate(
+    fit = map(
+      data, 
+      ~lmer(value ~ Time + (1|PID), data = .)
+    )
+  ) %>% 
+  mutate(
+    contrasts = map(
+      fit, 
+      ~emmeans(.x, "Time", lmer.df = "satterthwaite") %>% 
+        contrast(method = "trt.vs.ctrl", adjust = "none", infer = TRUE) %>% 
+        as.data.frame()
+    )
+  ) %>% 
+  select(-data, -fit) %>% 
+  unnest(contrasts) %>% 
+  separate(contrast, into = c("Time", "contrast"), sep = " - ")
+
+p2 <- p2_tab %>% 
+  ggplot(aes(Time, estimate, col = Group, fill = Group, group = Group)) +
+  scale_color_brewer(palette = "Set1", aesthetics = c("fill", "color")) +
+  scale_x_discrete(
+    breaks = c("Intervention", "Week 6"),
+    labels = c("Intv.", "Week 6")
+  ) +
+  scale_y_continuous(
+    "Change from baseline",
+    breaks = pretty_breaks()
+  ) +
+  geom_hline(yintercept = 0, size = .2) +
+  geom_pointrange(
+    aes(ymin = lower.CL, ymax = upper.CL),
+    position = position_dodge(.3)
+  ) +
+  theme(
+    axis.title.x = element_blank()
+  ) +
+  facet_wrap("Outcome", scales = "free_x")
+
+# Compose figure from plots
+pa <- p1 %+% filter(p1$data, Outcome != "K10")
+pb <- (p1 %+% filter(p1$data, Outcome == "K10")) 
+(pa) /
+  ((pb | p2) + plot_layout(widths = c(4, 6))) + plot_annotation(tag_levels = "A")
+ggsave("output/Figure-Data-1.tiff", width = 7.8, height = 5, dpi = 400)
+```
+
+Means with bootstrapped CIs in numbers
+
+```{r}
+panas %>% 
+  left_join(k10) %>% 
+  pivot_longer(c(`NA`, PA, K10S), names_to = "Outcome") %>% 
+  mutate(
+    Outcome = factor(
+      Outcome, 
+      levels = c("NA", "PA", "K10S")
+    )
+  ) %>% 
+  group_by(Outcome, Time) %>% 
+  summarise(mean_cl_boot(value)) %>% 
+  kbl(digits = 1, caption = "Means") %>% 
+  kable_styling(full_width = FALSE)
+```
+
+Change from baseline in numbers
+
+```{r}
+p2_tab %>% 
+  select(Group, Outcome, Time, estimate, SE, lower.CL, upper.CL, p.value) %>% 
+  kbl(digits = 3, caption = "Change from baseline") %>% 
+  kable_styling()
+```
+
+
+```{r}
+k10 %>% 
+  drop_na(K10S) %>% 
+  group_by(Time, Group) %>% 
+  summarise(`K10 > 19` = percent(sum(K10S>19, na.rm = TRUE)/n(), .1)) %>% 
+  kbl(caption = "Percentages of individuals with clinically significant symptoms") %>% 
+  kable_styling(full_width = FALSE)
+```
+
+## Group differences
+
+We estimate group differences with a multilevel model of each outcome, using baseline outcome (mean centered), group indicator (0/1 coded), and contrast coded (-0.5, 0.5) covariates age, gender, ethnicity, relationship, and current antidepressant use as predictors. In addition, we used timepoint and all its interactions as a predictor to get timepoint specific group effects.
+
+Remove the bit below when we've figure out the one participant discrepancy.
+
+```{r}
+# Find out who were randomised & analysed -- this is to be removed
+ids_randomised <- dpk %>%
+  filter(Time == "Baseline", Outcome == "NA") %>% 
+  distinct(PID, Group)
+ids_analysed <- dpk %>% 
+  filter(Time == "Intervention", Outcome == "PA") %>% 
+  drop_na(value) %>% 
+  distinct(PID, Group)
+anti_join(ids_randomised, ids_analysed) %>% 
+  write_csv("output/ids-randomised-but-not-analysed.csv")
+```
+
+
+```{r}
+dpk2 <- dpk %>%
+  arrange(Outcome, PID, Time) %>%
+  # Get baselines for each participant
+  group_by(Outcome, PID) %>% 
+  mutate(v1 = value[Time=="Baseline"]) %>% 
+  ungroup() %>% 
+  filter(Time != "Baseline") %>% 
+  group_by(Outcome) %>% 
+  mutate(
+    v1 = as.numeric(scale(v1, center = TRUE, scale = FALSE))
+  ) %>% 
+  drop_na(value) %>% 
+  ungroup()
+x <- dpk2 %>%
+  group_by(Outcome) %>% 
+  nest() %>% 
+  mutate(
+    fit = map(
+      data, 
+      ~lmer(
+        value ~ (Group + v1 + Age1617 + Male + White + Relationship + Antidepressant)*Time + (1 | PID), 
+        data = .x
+      )
+    )
+  ) %>% 
+  mutate(
+    contrasts = map(
+      fit, 
+      ~emmeans(., "Group", by = "Time") %>% 
+        pairs(reverse = TRUE, infer = TRUE)
+    )
+  ) %>% 
+  mutate(N = map_dbl(fit, ngrps)) %>% 
+  select(-data, -fit) %>% 
+  mutate(contrasts = map(contrasts, as.data.frame)) %>% 
+  unnest(contrasts) %>% 
+  select(-df)
+
+x %>% 
+  kbl(digits = 3, caption = "Time point specific ANCOVA model results for each of the main outcomes.") %>% 
+  kable_styling(full_width = FALSE)
+
+# Save table to a word file
+x %>% 
+  rename_with(str_to_title) %>% 
+  mutate(across(Estimate:P.value, ~format(round(., 3), nsmall = 3))) %>% 
+  flextable::flextable() %>% 
+  save_as_docx(
+    path = "output/Table-PANAS-group-differences.docx"
+  )
+
+pa <- x %>% 
+  ggplot(aes(estimate, Time)) +
+  scale_x_continuous(
+    "Treatment effect (95%CI)",
+    breaks = pretty_breaks()
+  ) +
+  geom_vline(xintercept = 0, size = .2, col = "gray80") +
+  geom_pointrangeh(
+    aes(xmin = lower.CL, xmax = upper.CL)
+  ) +
+  facet_wrap( ~ Outcome, scales = "fixed") +
+  theme(axis.title = element_blank(), legend.position = "right")
+```
+
+## Subgroup analyses
+
+The subgroup analyses are conducted on each outcome over the intervention phase (for NA and PA averaged over the intervention phase time points and K10at day 5).
+
+```{r Main-results, fig.cap = "A) Treatment effect (WoB - Ash) at each time point for the main outcomes. B) Treatment effect for each subgroup included in the analyses (on the mean outcome during the intervention)."}
+
+# Function to apply model to each outcome
+foo <- function(x) {
+  dpk2 %>% 
+    group_by(Outcome) %>% 
+    nest() %>% 
+    mutate(
+      fit = map(
+        data, 
+        ~lm(
+          str_glue(
+            "value ~ v1 + Group * {x} + Age1617 + Male + White + OCC_Engagement + Antidepressant + Baseline_moderate_MH"
+          ), 
+          data = .
+        )
+      )
+    )
+  
+}
+
+# Labels and variable names for target subgroups
+target <- c("Age1617", "Male", "OCC_Engagement", "Baseline_moderate_MH", "Antidepressant", "White")
+label <- c("Age (16-17)", "Male", "Online Culture", "Baseline moderate MH", "Antidepressants", "White")
+
+# Apply model to each subgroup
+pb <- tibble(target, label) %>%
+  mutate(out = map(target, ~foo(.x))) %>% 
+  unnest(out) %>% 
+  select(-data) %>% 
+  mutate(
+    out = map2(
+      fit, target, ~emmeans(.x, "Group", by = .y)
+    )
+  ) %>% 
+  mutate(
+    out = map2(
+      out, 
+      target, 
+      ~rename(as.data.frame(pairs(.x, reverse = TRUE, infer = TRUE)), subgroup = .y)
+    )
+  ) %>% 
+  unnest(out) %>% 
+  ggplot(aes(estimate, label, col = subgroup)) +
+  scale_x_continuous(
+    "Treatment effect (95%CI)",
+    breaks = pretty_breaks()
+  ) +
+  scale_color_brewer("Subgroup", palette = "Dark2", direction = -1) +
+  geom_vline(xintercept = 0, size = .2, col = "gray80") +
+  geom_pointrangeh(
+    aes(xmin = lower.CL, xmax = upper.CL),
+    position = position_dodge2v(.4),
+    fatten = 2.4, size = .4
+  ) +
+  facet_grid( ~ Outcome, scales = "fixed") +
+  theme(axis.title.y = element_blank(), legend.position = "right")
+plot_grid(
+  pa + coord_cartesian(xlim = c(-.6, .6)), 
+  pb + coord_cartesian(xlim = c(-.6, .6)), 
+  ncol = 1, align = "v", axis = "lr", labels = c("A", "B"),
+  rel_heights = c(3, 7)
+)
+ggsave("output/Figure-Parameters.tiff", width = 7.8, height = 5, dpi = 400)
+```
+
+# Flourishing & Loneliness
+
+```{r}
+flourishing <- d %>% 
+  filter(task == "Flourishing") %>% 
+  unnest(data) %>% 
+  select(
+    task, Time, Group, PID,
+    contains("quantised"), -contains("Example")
+  ) %>%
+  # Remove 'quantised' from variable names
+  rename_with(~ str_remove(., "-quantised") %>% str_replace("-", "_")) %>%
+  rename_with(~ str_remove(., "Flourishing_")) %>%
+  mutate(across(starts_with("Q"), as.numeric)) %>% 
+  mutate(
+    Flourishing = rowMeans(select(., starts_with("Q")), na.rm = TRUE)
+  ) %>% 
+  select(-c(task, Q1:Q8))
+
+ucla <- d %>% 
+  filter(task == "UCLA") %>% 
+  unnest(data) %>% 
+  select(
+    Time, Group, PID,
+    Companionship:Lonely
+  ) %>%
+  # Clean one variable name
+  rename_with(~ str_replace(., "-", "_"))
+
+# Weird values
+ucla_items <- c("Companionship", "Left_out", "Isolated", "Lonely")
+
+# Uncomment to check responses where Companionship=4
+# ucla %>%
+#   pivot_longer(all_of(ucla_items)) %>%
+#   count(name, value)
+ucla$Companionship[ucla$Companionship == 4] <- 3
+
+ucla <- ucla %>%
+  mutate(
+    Loneliness = rowMeans(ucla[, ucla_items], na.rm = TRUE)
+  ) %>% 
+  select(-all_of(ucla_items))
+```
+
+```{r}
+# Combined dataframe for Flourishing and UCLA
+duf <- flourishing %>% 
+  left_join(ucla) %>% 
+  pivot_longer(c(Flourishing, Loneliness), names_to = "Outcome") %>% 
+  mutate(Outcome = factor(Outcome))
+
+duf <- duf %>% 
+  left_join(demographics)
+```
+
+## Means and change over time
+
+```{r Data-figure-2, fig.width = 7.2, fig.height = 4.8, fig.cap = "Flourishing and Loneliness means and change over time."}
+p1 <- duf %>%
+  ggplot(aes(Time, value, col = Group, fill = Group, group = Group)) +
+  scale_color_brewer(palette = "Set1", aesthetics = c("fill", "color")) +
+  geom_quasirandom(
+    width = .1, dodge.width = .4, 
+    size = .4, alpha = 1 / 4, show.legend = FALSE
+  ) +
+  stat_summary(fun = mean, geom = "line") +
+  stat_summary(
+    fun.data = mean_cl_boot,
+    geom = "ribbon", alpha = .2, col = NA
+  ) +
+  scale_y_continuous("Mean value (95%CI)", breaks = pretty_breaks()) +
+  theme(
+    axis.title.x = element_blank(),
+    legend.position = "none"
+  ) +
+  facet_wrap("Outcome", scales = "free")
+
+p2 <- duf %>%
+  select(PID, Group, Time, Outcome, value) %>% 
+  group_by(Group, Outcome) %>%
+  nest() %>% 
+  mutate(
+    fit = map(
+      data, 
+      ~lmer(value ~ Time + (1|PID), data = .)
+    )
+  ) %>% 
+  mutate(
+    contrasts = map(
+      fit, 
+      ~emmeans(.x, "Time", lmer.df = "satterthwaite") %>% 
+        contrast(method = "trt.vs.ctrl", adjust = "none", infer = TRUE) %>% 
+        as.data.frame()
+    )
+  ) %>% 
+  select(-data, -fit) %>% 
+  unnest(contrasts) %>% 
+  separate(contrast, into = c("Time", "contrast"), sep = " - ") %>% 
+  mutate(
+    Time = factor(
+      Time, 
+      levels = c("Intervention", "Day 5", "Week 6"),
+      labels = c("Int.", "Day\n5", "Week\n6")
+    )
+  ) %>% 
+  ggplot(aes(Time, estimate, col = Group, fill = Group, group = Group)) +
+  scale_color_brewer(palette = "Set1", aesthetics = c("fill", "color")) +
+  scale_y_continuous(
+    "Change from baseline",
+    breaks = pretty_breaks()
+  ) +
+  geom_pointrange(
+    aes(ymin = lower.CL, ymax = upper.CL),
+    position = position_dodge(.3)
+  ) +
+  theme(
+    axis.title.x = element_blank()
+  ) +
+  facet_wrap("Outcome", scales = "free")
+
+# Compose figure from plots
+pa <- p1 %+% filter(p1$data, Outcome != "K10")
+pb <- (p1 %+% filter(p1$data, Outcome == "K10", Time != "Intervention")) 
+p1 / p2
+```
+
+## Group differences
+
+```{r}
+duf2 <- duf %>%
+  arrange(Outcome, PID, Time) %>%
+  # Get baselines for each participant
+  group_by(Outcome, PID) %>% 
+  mutate(v1 = value[Time=="Baseline"]) %>% 
+  ungroup() %>% 
+  filter(Time != "Baseline") %>% 
+  group_by(Outcome) %>% 
+  mutate(
+    v1 = as.numeric(scale(v1, center = TRUE, scale = FALSE))
+  ) %>% 
+  drop_na(value) %>% 
+  ungroup()
+x <- duf2 %>%
+  group_by(Outcome) %>% 
+  nest() %>% 
+  mutate(
+    fit = map(
+      data, 
+      ~lmer(
+        value ~ (Group + v1 + Age1617 + Male + White + Relationship + Antidepressant)*Time + (1 | PID), 
+        data = .x
+      )
+    )
+  ) %>% 
+  mutate(
+    contrasts = map(
+      fit, 
+      ~emmeans(., "Group", by = "Time") %>% pairs(reverse = TRUE, infer = TRUE)
+    )
+  ) %>% 
+  mutate(N = map_dbl(fit, ngrps)) %>% 
+  select(-data, -fit) %>% 
+  mutate(contrasts = map(contrasts, as.data.frame)) %>% 
+  unnest(contrasts) %>% 
+  select(-df, -t.ratio)
+
+x %>% 
+  kbl(digits = 3, caption = "Time point specific ANCOVA model results.") %>% 
+  kable_styling(full_width = FALSE)
+```
