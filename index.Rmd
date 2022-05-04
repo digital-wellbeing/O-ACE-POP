@@ -179,11 +179,16 @@ tab <- demographics %>%
   add_overall() %>% 
   bold_labels() %>% 
   italicize_levels()
-tab
 
 # Save table to a word file
 tab %>% 
   as_flex_table() %>% 
+  flextable::footnote(
+    i = c(61, 64, 67), 
+    j = 1, 
+    value = as_paragraph("Mild, moderate, and severe MH: A score of 20-24 was defined as being consistent with probable mild disorder, 25-29 with a probable moderate disorder and 30 and over with a probable severe disorder."), 
+    ref_symbols = "2"
+  ) %>% 
   save_as_docx(
     path = "output/Table-Demographics.docx"
   )
