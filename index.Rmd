@@ -488,22 +488,6 @@ k10 %>%
 
 We estimate group differences with a multilevel model of each outcome, using baseline outcome (mean centered), group indicator (0/1 coded), and contrast coded (-0.5, 0.5) covariates age, gender, ethnicity, relationship, and current antidepressant use as predictors. In addition, we used timepoint and all its interactions as a predictor to get timepoint specific group effects.
 
-Remove the bit below when we've figure out the one participant discrepancy.
-
-```{r}
-# Find out who were randomised & analysed -- this is to be removed
-ids_randomised <- dpk %>%
-  filter(Time == "Baseline", Outcome == "NA") %>% 
-  distinct(PID, Group)
-ids_analysed <- dpk %>% 
-  filter(Time == "Intervention", Outcome == "PA") %>% 
-  drop_na(value) %>% 
-  distinct(PID, Group)
-anti_join(ids_randomised, ids_analysed) %>% 
-  write_csv("output/ids-randomised-but-not-analysed.csv")
-```
-
-
 ```{r}
 dpk2 <- dpk %>%
   arrange(Outcome, PID, Time) %>%
@@ -579,7 +563,9 @@ The subgroup analyses are conducted on each outcome over the intervention phase 
 # Function to apply model to each outcome
 foo <- function(x) {
   dpk2 %>% 
-    group_by(Outcome) %>% 
+    group_by(across(c(everything(), -Time, -value, -K10S))) %>%
+    summarise(value = mean(value)) %>%
+    group_by(Outcome) %>%
     nest() %>% 
     mutate(
       fit = map(
