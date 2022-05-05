@@ -476,12 +476,16 @@ p2_tab %>%
   kable_styling()
 ```
 
+## Clinically significant symptoms
 
 ```{r}
 k10 %>% 
   drop_na(K10S) %>% 
   group_by(Time, Group) %>% 
-  summarise(`K10 > 19` = percent(sum(K10S>19, na.rm = TRUE)/n(), .1)) %>% 
+  summarise(
+    n = n(),
+    `K10 > 19` = percent(sum(K10S>19, na.rm = TRUE)/n, .1)
+    ) %>% 
   kbl(caption = "Percentages of individuals with clinically significant symptoms") %>% 
   kable_styling(full_width = FALSE)
 ```
