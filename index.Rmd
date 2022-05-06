@@ -47,7 +47,7 @@ library(tidyverse)
 # Document options
 # Knitr options
 opts_chunk$set(
-  echo = TRUE,
+  echo = FALSE,
   warning = FALSE,
   cache = TRUE,
   error = FALSE,
@@ -239,13 +239,13 @@ write_csv(demographics_synthetic, "Data/demographics-synthetic.csv")
 
 Then we load either the actual demographics values if available (only available to OACE team), otherwise the simulated demographics table (available on OSF).
 
-```{r message = TRUE}
+```{r message = FALSE, warning = TRUE}
 # Load anonymised demographics data set if available, otherwise synthetic
 if (file.exists("Data-private/demographics.csv")) {
-  message("Actual demographics data loaded")
+  warning("Actual demographics data loaded")
   demographics <- read_csv("Data-private/demographics.csv")
 } else {
-  message("Synthetic demographics data loaded")
+  warning("Synthetic demographics data loaded")
   demographics <- read_csv("Data/demographics-synthetic.csv")
 }
 
