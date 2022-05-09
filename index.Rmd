@@ -188,7 +188,8 @@ tab <- tab %>%
     j = 1, 
     value = as_paragraph("Mild, moderate, and severe MH: A score of 20-24 was defined as being consistent with probable mild disorder, 25-29 with a probable moderate disorder and 30 and over with a probable severe disorder."), 
     ref_symbols = "2"
-  )
+  ) %>% 
+  flextable::set_caption(caption = "Table 1: Demographics")
 tab  
 tab %>% 
   save_as_docx(
@@ -445,7 +446,11 @@ p2 <- p2_tab %>%
 pa <- p1 %+% filter(p1$data, Outcome != "K10")
 pb <- (p1 %+% filter(p1$data, Outcome == "K10")) 
 (pa) /
-  ((pb | p2) + plot_layout(widths = c(4, 6))) + plot_annotation(tag_levels = "A")
+  ((pb | p2) + plot_layout(widths = c(4, 6))) + 
+  plot_annotation(
+    title = "Figure 2: Changes over time",
+    tag_levels = "A"
+  )
 ggsave("output/Figure-Data-1.tiff", width = 7.8, height = 5, dpi = 400)
 ```
 
@@ -542,6 +547,7 @@ x %>%
   rename_with(str_to_title) %>% 
   mutate(across(Estimate:P.value, ~format(round(., 3), nsmall = 3))) %>% 
   flextable::flextable() %>% 
+  flextable::set_caption(caption = "Table 2: Group Differences") %>% 
   save_as_docx(
     path = "output/Table-PANAS-group-differences.docx"
   )
@@ -628,7 +634,10 @@ plot_grid(
   pb + coord_cartesian(xlim = c(-.6, .6)), 
   ncol = 1, align = "v", axis = "lr", labels = c("A", "B"),
   rel_heights = c(3, 7)
-)
+) +
+  plot_annotation(
+    title = "Figure 3: Subgroups"
+  )
 ggsave("output/Figure-Parameters.tiff", width = 7.8, height = 5, dpi = 400)
 ```
 
