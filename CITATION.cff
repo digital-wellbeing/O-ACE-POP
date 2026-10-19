@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+title: 'Code and data supplement to "A co-produced online cultural experience compared to a typical museum website for mental health in people aged 16–24: a proof-of-principle randomised controlled trial"'
+version: 1.0.1
+license: CC0-1.0
+type: dataset
+abstract: |
+  The mental health of young people (YP) is a major public health concern that has worsened during the COVID-19 pandemic. Whilst engaging with culture and the arts may have mental health benefits there is a dearth of experimental research regarding the impact of online arts and culture on depression and anxiety in YP. In particular online interventions, which may improve accessibility. Objective: We aimed to compare a co-produced online intervention encompassing the diverse human stories behind art and artefacts, named Ways of Being (WoB), with a typical museum website, the Ashmolean (Ash) on negative affect (NA), positive affect (PA) and psychological distress (K10). Methods: In this parallel group RCT, 463 YP aged 16-24 were randomly assigned, 231 to WoB and 232 to Ash. Results: Over the intervention phase (an aggregate score including all post-allocation timepoints to day-five) a group difference was apparent in favour of WoB for NA (WoB-Ash n=448, NA -0.158, p=0.010) but no differences were detected for PA or K10 and differences were not detected at week six. Group differences in NA in favour of WoB were detected in specific subgroups, e.g. ethnic minorities and males. Across participants (from both groups) mean K10 and NA improved between baseline and six weeks despite increased COVID-19 restrictions. Trial recruitment was rapid, retention high and feedback positive with broad geographical, occupational and ethnic diversity. Conclusions: Online engagement with arts and culture has the potential to impact on mental health in a measurable way in YP with high unmet mental health needs.
+message: Please cite as indicated.
+authors:
+  - family-names: Syed Sheriff
+    given-names: Rebecca
+    affiliation: University of Oxford
+  - family-names: Vuorre
+    given-names: Matti
+    orcid: https://orcid.org/0000-0001-5052-066X
+    affiliation: University of Oxford
+  - family-names: Riga
+    given-names: Evgenia
+    affiliation: University of Oxford
+  - family-names: Przybylski
+    given-names: Andrew
+    orcid: https://orcid.org/0000-0001-5547-2185
+    affiliation: University of Oxford
+  - family-names: Adams
+    given-names: Helen
+    affiliation: NIHR Oxford Health Biomedical Research Centre
+  - family-names: Geddes
+    given-names: John
+    affiliation: University of Oxford
+keywords:
+  - psychology
